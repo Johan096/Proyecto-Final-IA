@@ -1,7 +1,7 @@
 # Proyecto-de-Final-IA
 
-## Nombre
+## Nombre:  Johan Daniel 
 
-## Matrícula
+## Matrícula:  22-SISN-2-041
 
-## Proyecto
+## Proyecto:   Clasificador de imagenes 
