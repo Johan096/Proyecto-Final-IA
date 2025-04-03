@@ -24,9 +24,9 @@ def initialize_model(device: str):
     """
     logger.info("Cargando el processor y el modelo para clasificación de imágenes...")
     try:
-        processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224")
+        processor = ViTImageProcessor.from_pretrained("google/vit-large-patch16-224")
         # Habilitamos output_attentions para la visualización interpretativa
-        model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224", output_attentions=True).to(device)
+        model = ViTForImageClassification.from_pretrained("google/vit-large-patch16-224", output_attentions=True).to(device)
         model.eval()  # Modo evaluación para la inferencia
         logger.info("Modelo de clasificación cargado correctamente.")
     except Exception as e:
@@ -74,8 +74,10 @@ def overlay_heatmap_on_image(image, heatmap):
     blended = Image.blend(image_rgba, heatmap_color, alpha=0.5)
     return blended
 
-def classify_image(image: Image.Image, processor, model, device: str, top_k: int = 1, 
-                   show_attention: bool = False, use_tta: bool = False, show_probability_chart: bool = False):
+def classify_image(image: Image.Image, processor, model, device: str, 
+                   top_k: int = 1, show_attention: bool = False, use_tta: bool = False, 
+                   show_probability_chart: bool = False, idioma: str = "Español", 
+                   modo_oscuro: bool = False):
     """
     Clasifica la imagen y opcionalmente genera un heatmap de atención y un gráfico de barras de probabilidades.
     
@@ -88,15 +90,26 @@ def classify_image(image: Image.Image, processor, model, device: str, top_k: int
         show_attention (bool): Si True, genera y retorna el heatmap de atención.
         use_tta (bool): Si True, utiliza Test Time Augmentation (flip horizontal) para robustez.
         show_probability_chart (bool): Si True, muestra un gráfico de barras con las probabilidades de las predicciones.
+        idioma (str): "Español" o "Inglés" para la presentación de etiquetas.
+        modo_oscuro (bool): Si True, ajusta los gráficos al modo oscuro.
     
     Returns:
-        tuple: (str: resultados de clasificación, PIL.Image.Image or None: heatmap de atención,
-                PIL.Image.Image or None: gráfico de probabilidades)
+        tuple: (PIL.Image.Image: imagen original, str: resultados de clasificación, 
+                PIL.Image.Image or None: heatmap de atención, PIL.Image.Image or None: gráfico de probabilidades)
     """
     logger.info("Clasificando la imagen...")
     try:
         if not isinstance(image, Image.Image):
             image = Image.open(image)
+        original_img = image.copy()  # Guardamos la imagen original para el preview
+
+        # Diccionario de traducción de etiquetas de ejemplo
+        translation_dict = {
+            "Dog": "Perro",
+            "Cat": "Gato",
+            "dog": "perro",
+            "cat": "gato"
+        }
 
         # Aplicar Test Time Augmentation (TTA) si está activado
         if use_tta:
@@ -125,6 +138,8 @@ def classify_image(image: Image.Image, processor, model, device: str, top_k: int
         results = []
         for prob, idx in zip(top_probs[0], top_indices[0]):
             label = model.config.id2label[idx.item()]
+            if idioma == "Español":
+                label = translation_dict.get(label, label)
             results.append(f"{label}: {prob.item()*100:.2f}%")
         result_text = "\n".join(results)
 
@@ -133,11 +148,19 @@ def classify_image(image: Image.Image, processor, model, device: str, top_k: int
         if show_probability_chart:
             fig, ax = plt.subplots(figsize=(6,4))
             labels = [model.config.id2label[idx.item()] for idx in top_indices[0]]
+            if idioma == "Español":
+                labels = [translation_dict.get(label, label) for label in labels]
             probabilities = [prob.item() for prob in top_probs[0]]
             ax.bar(labels, probabilities, color='skyblue')
             ax.set_ylim(0,1)
             ax.set_ylabel('Probabilidad')
             ax.set_title('Probabilidades de las predicciones')
+            if modo_oscuro:
+                fig.patch.set_facecolor('black')
+                ax.set_facecolor('black')
+                ax.title.set_color('white')
+                ax.tick_params(colors='white')
+                ax.yaxis.label.set_color('white')
             fig.tight_layout()
             buf = BytesIO()
             fig.savefig(buf, format='png')
@@ -158,15 +181,15 @@ def classify_image(image: Image.Image, processor, model, device: str, top_k: int
             attn_map_img = Image.fromarray((attn_map*255).astype("uint8")).resize(image.size, resample=Image.BILINEAR)
             attn_image = overlay_heatmap_on_image(image, attn_map_img)
 
-        return result_text, attn_image, prob_chart_image
+        return original_img, result_text, attn_image, prob_chart_image
     except Exception as e:
         logger.error(f"Error al clasificar la imagen: {e}")
-        return "Error clasificando la imagen. Verifica la imagen y los parámetros.", None, None
+        return None, "Error clasificando la imagen. Verifica la imagen y los parámetros.", None, None
 
 def main():
     """
     Función principal que configura y lanza la interfaz de Gradio para el Clasificador de Imágenes Profesional.
-    Incorpora características de robustez, eficiencia e interpretabilidad.
+    Incorpora mejoras visuales y de usabilidad sin alterar la funcionalidad original.
     """
     # Configurar el dispositivo (GPU si está disponible, de lo contrario CPU)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -178,55 +201,43 @@ def main():
     # CSS personalizado para una presentación profesional y dinámica
     css = """
     .gradio-container {
-        background-color: #f0f4f8;
         font-family: 'Arial', sans-serif;
-    }
-    .gradio-title {
-        background: linear-gradient(90deg, #4facfe, #00f2fe);
-        color: white;
-        padding: 15px;
-        border-radius: 5px;
-        text-align: center;
-    }
-    .gradio-description, .gradio-article {
-        font-size: 1.1em;
-        color: #333;
     }
     """
 
-    # Configurar la interfaz de Gradio con opciones para top_k, TTA, atención y gráfico de probabilidades
-    interface = gr.Interface(
-        fn=lambda image, top_k, show_attention, use_tta, show_probability_chart: classify_image(
-            image, processor, model, device, top_k, show_attention, use_tta, show_probability_chart
-        ),
-        inputs=[
-            gr.Image(type="pil", label="Sube una imagen para clasificar"),
-            gr.Slider(minimum=1, maximum=5, step=1, value=1, label="Número de predicciones (Top K)"),
-            gr.Checkbox(label="Mostrar mapa de atención", value=False),
-            gr.Checkbox(label="Usar Test Time Augmentation (flip horizontal)", value=False),
-            gr.Checkbox(label="Mostrar gráfico de probabilidades", value=False)
-        ],
-        outputs=[
-            gr.Textbox(label="Predicciones"),
-            gr.Image(label="Mapa de Atención (opcional)"),
-            gr.Image(label="Gráfico de Probabilidades (opcional)")
-        ],
-        title="Clasificador de Imágenes Profesional",
-        description=(
-            "Bienvenido al Clasificador de Imágenes Profesional. "
-            "Esta aplicación utiliza un modelo de deep learning basado en ViT para clasificar imágenes. "
-            "Cuenta con técnicas de robustez como TTA y ofrece visualizaciones interpretativas, como mapas de atención y gráficos de probabilidades."
-        ),
-        article=(
-            "Desarrollado con PyTorch y Hugging Face, este clasificador ofrece una interfaz profesional y dinámica "
-            "mediante Gradio. Se han incorporado mejoras que permiten obtener predicciones más claras y una mejor interpretación de los resultados."
-        ),
-        css=css,
-        allow_flagging="never"
-    )
+    with gr.Blocks(css=css) as demo:
+        gr.Markdown("# Clasificador de Imágenes Profesional")
+        gr.Markdown("Esta aplicación utiliza un modelo ViT para clasificar imágenes y ofrece interpretabilidad a través de mapas de atención y gráficos de probabilidad. Además, cuenta con soporte multilenguaje y modo oscuro/claro.")
+        
+        with gr.Row():
+            with gr.Column(scale=1):
+                image_input = gr.Image(label="Sube una imagen para clasificar", type="pil")
+                idioma_dropdown = gr.Dropdown(choices=["Español", "Inglés"], value="Español", label="Idioma")
+                modo_oscuro_checkbox = gr.Checkbox(label="Modo Oscuro", value=False)
+                with gr.Accordion("Opciones Avanzadas", open=False):
+                    top_k_slider = gr.Slider(minimum=1, maximum=5, step=1, value=1, label="Número de predicciones (Top K)")
+                    show_attention_checkbox = gr.Checkbox(label="Mostrar mapa de atención", value=False)
+                    use_tta_checkbox = gr.Checkbox(label="Usar Test Time Augmentation (flip horizontal)", value=False)
+                    show_prob_chart_checkbox = gr.Checkbox(label="Mostrar gráfico de probabilidades", value=False)
+                classify_button = gr.Button("Clasificar")
+            with gr.Column(scale=1):
+                gr.Markdown("### Resultados")
+                original_image_output = gr.Image(label="Imagen Original")
+                classification_output = gr.Textbox(label="Predicciones")
+                attention_output = gr.Image(label="Mapa de Atención (opcional)")
+                prob_chart_output = gr.Image(label="Gráfico de Probabilidades (opcional)")
 
-    # Lanzar la interfaz en un servidor local
-    interface.launch()
+        # Al hacer clic en el botón se ejecuta la función de clasificación
+        classify_button.click(
+            fn=lambda image, top_k, show_attention, use_tta, show_prob_chart, idioma, modo_oscuro: 
+                classify_image(image, processor, model, device, top_k, show_attention, use_tta, show_prob_chart, idioma, modo_oscuro),
+            inputs=[image_input, top_k_slider, show_attention_checkbox, use_tta_checkbox, show_prob_chart_checkbox, idioma_dropdown, modo_oscuro_checkbox],
+            outputs=[original_image_output, classification_output, attention_output, prob_chart_output]
+        )
+    
+        gr.Markdown("Desarrollado con PyTorch, Hugging Face y Gradio.")
+
+    demo.launch()
 
 if __name__ == "__main__":
     main()
