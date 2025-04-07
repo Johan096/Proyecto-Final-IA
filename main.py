@@ -8,7 +8,7 @@ import os
 import time
 
 # Inicializa cliente de OpenAI (usa variable de entorno o escribe tu clave)
-client = OpenAI(api_key="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")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Inicializar logging
 logging.basicConfig(level=logging.INFO)
