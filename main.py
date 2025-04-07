@@ -3,13 +3,12 @@ import torch
 from transformers import ViTForImageClassification, ViTImageProcessor
 import gradio as gr
 from PIL import Image
-import openai
+from openai import OpenAI
 import os
 import time
 
-# Configura tu API Key de OpenAI
-openai.api_key = "sk-...RuoA"
-
+# Inicializa cliente de OpenAI (usa variable de entorno o escribe tu clave)
+client = OpenAI(api_key="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")
 
 # Inicializar logging
 logging.basicConfig(level=logging.INFO)
@@ -29,8 +28,8 @@ def initialize_model(device: str):
 def LLM(contexto):
     try:
         mensajes.append({"role": "user", "content": contexto})
-        respuesta = openai.ChatCompletion.create(
-            model="gpt-4o",
+        respuesta = client.chat.completions.create(
+            model="gpt-4o",  # puedes cambiar a gpt-3.5-turbo si lo prefieres
             messages=mensajes
         )
         return respuesta.choices[0].message.content
@@ -56,7 +55,7 @@ def classify_image(image, processor, model, device):
         label = model.config.id2label[top_idx[0].item()]
         confidence = top_prob[0].item() * 100
 
-        # Traducción básica (puedes expandir este diccionario)
+        # Traducción básica
         traducciones = {
             "cat": "gato", "dog": "perro", "person": "persona", "car": "auto", "bicycle": "bicicleta"
         }
