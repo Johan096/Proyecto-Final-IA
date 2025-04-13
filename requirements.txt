@@ -1,5 +1,6 @@
 torch
-transformers==4.37.2
+transformers
 gradio
 Pillow
-openai>=1.0.0
+openai
+python-dotenv
